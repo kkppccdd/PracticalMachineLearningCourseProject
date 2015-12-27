@@ -1,0 +1,144 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Ray Cai"
+date: "December 25, 2015"
+output: pdf_document
+---
+
+# Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, my goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+
+
+# Data Preparation
+
+This project is to build a prediction model which used to predict the manner in which people did the barbell exercise. We categorize the manner in which people did the barbell exercise into 5 classes **A**, **B**, **C**, **D** and **E**. **A** is the best, **E** is the worst.
+
+## Getting Data
+```{r echo = TRUE,warning=FALSE}
+require(caret,quietly=TRUE)
+require(MASS,quietly = TRUE)
+require(knitr,quietly=TRUE)
+knitr::opts_chunk$set(cache=TRUE)
+set.seed(12345)
+data<-read.csv('pml-training.csv',header=TRUE)
+```
+The data for this project come from this source: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har). The raw data has `r nrow(data)` measurements, each measurement has `r ncol(data)-1` variables.
+
+## Clean Data
+```{r echo = TRUE,warning=FALSE}
+# the threshold of NA/empty value
+naValuePercentThreshold<-0.10;
+
+data<-data[,3:length(colnames(data))]
+data$cvtd_timestamp<-factor(as.numeric(strptime(data$cvtd_timestamp, "%d/%m/%Y %H:%M")))
+naCounts<-sapply(data,FUN=function(x){
+  sum(is.na(x) | x=="")
+})
+
+data<-data[,naCounts/nrow(data)<naValuePercentThreshold]
+
+data<-na.omit(data)
+
+```
+
+Obviously, the  data set is not clean data set. There is much NA and empty value. Therefore I tidy train data set by below steps:
+
+1. Exclude variable **username**, it's obbious unrelated to the outcome
+2. Convert timestamp from string to long
+3. Exclude variables which contains more than `r naValuePercentThreshold*100`% NA/empty value
+4. Omit measurements which contain NA values
+
+After tidy, I got `r ncol(data)` variables and `r nrow(data)` measurements data set.
+
+## Split Data
+```{r echo = FALSE,warning=FALSE}
+
+inTrain<-createDataPartition(y=data$classe,p=0.80,list=FALSE)
+trainData<-data[inTrain,]
+testData<-data[-inTrain,]
+
+```
+
+I split the raw data into train/test two parts by percentage 60%/40%.
+
+Data Set              | # of measurements(# of row) | # of varaibles(# of column)| % of Total Data
+----------------------|-----------------------------|----------------------------|----------------
+Train Data            |`r nrow(trainData)`          |`r ncol(trainData)`         | 80%
+Test Data             |`r nrow(testData)`           |`r ncol(testData)`          |20%
+
+# Explore Feature
+
+## Filter feature by requirement
+My goal is using data from accelerometers on the belt, forearm, arm and dumbell to build a prediction model, for predict whether perform barbell lifts coreectly or incorrectly. Therefore I only need include measurements of belt, forearm, arm and dumbell in predictors.
+```{r echo=TRUE,warning=FALSE}
+includedVariableIndex<-grepl("belt|arm|dumbell|classe",colnames(trainData))
+trainData<-trainData[,includedVariableIndex]
+```
+## Filter feature by variance
+```{r echo=FALSE,warning=FALSE}
+nearZeroVarIndex<-nearZeroVar(trainData,saveMetrics=FALSE)
+if(sum(nearZeroVarIndex)!=0){
+  trainData<-trainData[,-nearZeroVarIndex]
+}
+```
+Features which have high variance and high uniqueness are more helpful to distinguish the class. In contrast, low variance and low uniqueness features are less helpful to predict outcome. Calculated variance of candidates features, `r if(sum(nearZeroVarIndex)!=0) {"there is not any feature has near zero variance."}else{paste("there is ",sum(nearZeroVarIndex)," features have near zero varaince, exclude them.")}`
+
+Plot relationships between features and outcome, From the plot below, all features have realtively similar distribution among the 5 outcome levels(**A**,**B**,**C**,**D**,**E**).
+
+```{r echo=TRUE,warning=FALSE}
+featurePlot(trainData[,-ncol(trainData)],trainData$classe,"strip")
+```
+
+Plot correlation matrix between features, found there is only a few features are high correlated (heavy red rectanguler on plot). Therefore I choose to not performa further PCA preprocessing.
+
+```{r echo=TRUE,warning=FALSE}
+library(reshape2)
+library(ggplot2)
+
+# Get upper triangle of the correlation matrix
+get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+}
+cormat <- round(cor(trainData[,-ncol(trainData)]),2)
+upper_tri <- get_upper_tri(cormat)
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+# Heatmap
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Feature\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 90, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+```
+
+# Train Model
+
+```{r echo = TRUE,warning=FALSE}
+require(randomForest,quietly=TRUE)
+trainControl <- trainControl(method="repeatedcv", p=0.75)
+trainTime<-system.time(
+  modelFit<-train(classe~.,data=trainData,method="rf",trControl=trainControl,verbose=TRUE)
+)
+predictionByModelFit<-predict(modelFit,testData)
+cmModelFit<-confusionMatrix(predictionByModelFit,testData$classe)
+```
+Expected error rate is less than `1%` fro a good classification. Train a model to predict activity quality(`classe` outcome) from `r ncol(trainData)-1` features by using Random Forest algrithm. With cross validation by method `repeatedcv`. I got a model which with OOB estimate of  error rate: `r tail(modelFit$finalModel$err.rate,1)[1]*100`%, less than the threshold `1%`. Therefore the model satisified the requirement.
+
+
+# Verify Model
+
+```{r echo=TRUE,warning=FALSE}
+testResult<-predict(modelFit,testData)
+testCM<-confusionMatrix(testResult,testData$classe)
+```
+
+Tested final model by test data, found the overall accuracy is `r testCM$overall[[1]]*100`%. For all 5 outcome levels (**A**, **B**, **C**, **D** and **E**), it all got perfect **Sensitivity** and **Sepcificity**:
+```{r echo=TRUE,warning=FALSE}
+testCM$byClass[,1:2]
+```
