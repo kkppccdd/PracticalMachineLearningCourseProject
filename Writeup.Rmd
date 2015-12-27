@@ -2,7 +2,7 @@
 title: "Practical Machine Learning Course Project"
 author: "Ray Cai"
 date: "December 25, 2015"
-output: pdf_document
+output: html_document
 ---
 
 # Background
@@ -87,13 +87,13 @@ Features which have high variance and high uniqueness are more helpful to distin
 
 Plot relationships between features and outcome, From the plot below, all features have realtively similar distribution among the 5 outcome levels(**A**,**B**,**C**,**D**,**E**).
 
-```{r echo=TRUE,warning=FALSE}
+```{r echo=TRUE,warning=FALSE,fig.width=10,fig.height=10}
 featurePlot(trainData[,-ncol(trainData)],trainData$classe,"strip")
 ```
 
 Plot correlation matrix between features, found there is only a few features are high correlated (heavy red rectanguler on plot). Therefore I choose to not performa further PCA preprocessing.
 
-```{r echo=TRUE,warning=FALSE}
+```{r echo=TRUE,warning=FALSE,fig.width=10,fig.height=10}
 library(reshape2)
 library(ggplot2)
 
